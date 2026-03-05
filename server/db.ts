@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users } from "../drizzle/schema";
+import { InsertUser, chatMessages, chatSessions, users, webhookEvents } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -89,4 +89,97 @@ export async function getUserByOpenId(openId: string) {
   return result.length > 0 ? result[0] : undefined;
 }
 
-// TODO: add feature queries here as your schema grows.
+// ─── Chat Sessions ────────────────────────────────────────────────────────────
+
+export async function createChatSession(userId: number, title?: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const result = await db.insert(chatSessions).values({ userId, title: title ?? "New Conversation" });
+  return result[0];
+}
+
+export async function getChatSessions(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return await db.select().from(chatSessions).where(eq(chatSessions.userId, userId)).orderBy(desc(chatSessions.updatedAt)).limit(50);
+}
+
+export async function getChatSession(sessionId: number, userId: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId)).limit(1);
+  if (!result[0] || result[0].userId !== userId) return undefined;
+  return result[0];
+}
+
+export async function updateChatSessionTitle(sessionId: number, title: string) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(chatSessions).set({ title }).where(eq(chatSessions.id, sessionId));
+}
+
+export async function deleteChatSession(sessionId: number, userId: number) {
+  const db = await getDb();
+  if (!db) return;
+  const session = await getChatSession(sessionId, userId);
+  if (!session) return;
+  await db.delete(chatMessages).where(eq(chatMessages.sessionId, sessionId));
+  await db.delete(chatSessions).where(eq(chatSessions.id, sessionId));
+}
+
+// ─── Chat Messages ────────────────────────────────────────────────────────────
+
+export async function addChatMessage(
+  sessionId: number,
+  role: "user" | "assistant" | "tool",
+  content: string,
+  toolName?: string,
+  toolResult?: unknown
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.insert(chatMessages).values({ sessionId, role, content, toolName: toolName ?? null, toolResult: toolResult ?? null });
+}
+
+export async function getChatMessages(sessionId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return await db.select().from(chatMessages).where(eq(chatMessages.sessionId, sessionId)).orderBy(chatMessages.createdAt);
+}
+
+// ─── Webhook Events ───────────────────────────────────────────────────────────
+
+export async function saveWebhookEvent(event: {
+  stripeEventId: string;
+  eventType: string;
+  objectId?: string;
+  objectType?: string;
+  payload?: unknown;
+}) {
+  const db = await getDb();
+  if (!db) return;
+  try {
+    await db.insert(webhookEvents).values({
+      stripeEventId: event.stripeEventId,
+      eventType: event.eventType,
+      objectId: event.objectId ?? null,
+      objectType: event.objectType ?? null,
+      status: "received",
+      payload: event.payload ?? null,
+    });
+  } catch (e: unknown) {
+    if ((e as { code?: string }).code !== "ER_DUP_ENTRY") throw e;
+  }
+}
+
+export async function getWebhookEvents(limit = 50) {
+  const db = await getDb();
+  if (!db) return [];
+  return await db.select().from(webhookEvents).orderBy(desc(webhookEvents.createdAt)).limit(limit);
+}
+
+export async function markWebhookProcessed(stripeEventId: string, status: "processed" | "failed") {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(webhookEvents).set({ status }).where(eq(webhookEvents.stripeEventId, stripeEventId));
+}

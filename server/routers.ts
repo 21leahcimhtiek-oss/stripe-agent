@@ -1,28 +1,282 @@
 import { COOKIE_NAME } from "@shared/const";
+import { TRPCError } from "@trpc/server";
+import { z } from "zod";
 import { getSessionCookieOptions } from "./_core/cookies";
+import { invokeLLM } from "./_core/llm";
 import { systemRouter } from "./_core/systemRouter";
-import { publicProcedure, router } from "./_core/trpc";
+import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
+import {
+  addChatMessage,
+  createChatSession,
+  deleteChatSession,
+  getChatMessages,
+  getChatSession,
+  getChatSessions,
+  getWebhookEvents,
+  updateChatSessionTitle,
+} from "./db";
+import stripe from "./stripe";
+import { STRIPE_TOOLS, executeStripeTool } from "./stripeTools";
+
+const SYSTEM_PROMPT = `You are StripeAgent, an expert AI assistant for managing Stripe payment infrastructure. You help users control their Stripe account through natural language.
+
+You have access to the following Stripe capabilities:
+- Customer management: create, list, search, update, delete customers
+- Product & pricing catalog: create products, set one-time or recurring prices
+- Subscription lifecycle: create, cancel, pause, resume subscriptions
+- Invoice operations: create, finalize, send, void invoices
+- Payment tracking: list payment intents, charges, process refunds
+- Account balance: check current balance
+- Coupons & discounts: create and list coupons
+
+Guidelines:
+- Always confirm destructive actions (delete, cancel, void) before executing them
+- Present monetary amounts in human-readable format (e.g., $9.99 not 999)
+- When listing results, format them as clean tables or structured lists
+- If an operation fails, explain the error clearly and suggest alternatives
+- For IDs, always show them so users can reference them in follow-up commands
+- Be proactive: after creating a resource, offer logical next steps
+- Keep responses concise but complete`;
+
+const agentRouter = router({
+  chat: protectedProcedure
+    .input(z.object({ sessionId: z.number(), message: z.string().min(1).max(4000) }))
+    .mutation(async ({ ctx, input }) => {
+      const session = await getChatSession(input.sessionId, ctx.user.id);
+      if (!session) throw new TRPCError({ code: "NOT_FOUND", message: "Chat session not found" });
+
+      await addChatMessage(input.sessionId, "user", input.message);
+      const history = await getChatMessages(input.sessionId);
+
+      const messages: Array<{ role: "system" | "user" | "assistant" | "tool"; content: string }> = [
+        { role: "system", content: SYSTEM_PROMPT },
+        ...history.map((m) => ({ role: m.role as "user" | "assistant" | "tool", content: m.content })),
+      ];
+
+      let iterations = 0;
+      const MAX_ITERATIONS = 8;
+      let finalResponse = "";
+      const toolCallLog: Array<{ name: string; result: unknown }> = [];
+
+      while (iterations < MAX_ITERATIONS) {
+        iterations++;
+        const response = await invokeLLM({
+          messages,
+          tools: STRIPE_TOOLS as unknown as Parameters<typeof invokeLLM>[0]["tools"],
+          tool_choice: "auto",
+        });
+
+        const choice = response.choices?.[0];
+        if (!choice) break;
+        const msg = choice.message;
+
+        if (!msg.tool_calls || msg.tool_calls.length === 0) {
+          finalResponse = typeof msg.content === "string" ? msg.content : "";
+          break;
+        }
+
+        messages.push({ role: "assistant", content: JSON.stringify({ tool_calls: msg.tool_calls }) });
+
+        for (const toolCall of msg.tool_calls) {
+          const toolName = toolCall.function.name;
+          let toolArgs: Record<string, unknown> = {};
+          try { toolArgs = JSON.parse(toolCall.function.arguments ?? "{}"); } catch { /* ignore */ }
+
+          let toolResult: unknown;
+          let toolResultStr: string;
+          try {
+            toolResult = await executeStripeTool(toolName, toolArgs);
+            toolResultStr = JSON.stringify(toolResult, null, 2);
+            toolCallLog.push({ name: toolName, result: toolResult });
+          } catch (err: unknown) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            toolResult = { error: errMsg };
+            toolResultStr = JSON.stringify({ error: errMsg });
+          }
+
+          messages.push({ role: "tool", content: toolResultStr });
+          await addChatMessage(input.sessionId, "tool", toolResultStr, toolName, toolResult);
+        }
+      }
+
+      if (finalResponse) {
+        await addChatMessage(input.sessionId, "assistant", finalResponse);
+      }
+
+      if (session.title === "New Conversation" && history.length <= 1) {
+        const titleResponse = await invokeLLM({
+          messages: [
+            { role: "system", content: "Generate a very short title (3-6 words) for this conversation. Return only the title, no quotes." },
+            { role: "user", content: input.message },
+          ],
+        });
+        const rawTitle = titleResponse.choices?.[0]?.message?.content;
+        const title = (typeof rawTitle === "string" ? rawTitle.trim() : "") || "Stripe Conversation";
+        await updateChatSessionTitle(input.sessionId, title.slice(0, 60));
+      }
+
+      return { response: finalResponse, toolCalls: toolCallLog.map((t) => t.name) };
+    }),
+});
+
+const chatRouter = router({
+  getSessions: protectedProcedure.query(async ({ ctx }) => getChatSessions(ctx.user.id)),
+
+  createSession: protectedProcedure
+    .input(z.object({ title: z.string().optional() }))
+    .mutation(async ({ ctx, input }) => {
+      await createChatSession(ctx.user.id, input.title);
+      const sessions = await getChatSessions(ctx.user.id);
+      return sessions[0]!;
+    }),
+
+  getMessages: protectedProcedure
+    .input(z.object({ sessionId: z.number() }))
+    .query(async ({ ctx, input }) => {
+      const session = await getChatSession(input.sessionId, ctx.user.id);
+      if (!session) throw new TRPCError({ code: "NOT_FOUND" });
+      return getChatMessages(input.sessionId);
+    }),
+
+  deleteSession: protectedProcedure
+    .input(z.object({ sessionId: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      await deleteChatSession(input.sessionId, ctx.user.id);
+      return { success: true };
+    }),
+});
+
+const dashboardRouter = router({
+  metrics: protectedProcedure.query(async () => {
+    const [customers, subscriptions, balance, recentCharges] = await Promise.allSettled([
+      stripe.customers.list({ limit: 1 }),
+      stripe.subscriptions.list({ limit: 100, status: "active" }),
+      stripe.balance.retrieve(),
+      stripe.charges.list({ limit: 5 }),
+    ]);
+
+    let mrr = 0;
+    if (subscriptions.status === "fulfilled") {
+      for (const sub of subscriptions.value.data) {
+        for (const item of sub.items.data) {
+          const price = item.price;
+          if (price.unit_amount && price.recurring) {
+            const amount = price.unit_amount / 100;
+            if (price.recurring.interval === "month") mrr += amount;
+            else if (price.recurring.interval === "year") mrr += amount / 12;
+            else if (price.recurring.interval === "week") mrr += amount * (52 / 12);
+            else if (price.recurring.interval === "day") mrr += amount * (365 / 12);
+          }
+        }
+      }
+    }
+
+    return {
+      totalCustomers: customers.status === "fulfilled" ? ((customers.value as unknown as { total_count?: number }).total_count ?? customers.value.data.length) : 0,
+      activeSubscriptions: subscriptions.status === "fulfilled" ? subscriptions.value.data.length : 0,
+      mrr: Math.round(mrr * 100) / 100,
+      balance: balance.status === "fulfilled" ? balance.value.available.map((b) => ({ amount: b.amount / 100, currency: b.currency })) : [],
+      recentCharges: recentCharges.status === "fulfilled"
+        ? recentCharges.value.data.map((c) => ({
+            id: c.id,
+            amount: c.amount / 100,
+            currency: c.currency,
+            status: c.status,
+            description: c.description,
+            created: c.created,
+            customerEmail: c.billing_details?.email ?? null,
+          }))
+        : [],
+    };
+  }),
+
+  recentInvoices: protectedProcedure.query(async () => {
+    const invoices = await stripe.invoices.list({ limit: 10 });
+    return invoices.data.map((inv) => ({
+      id: inv.id,
+      number: inv.number,
+      status: inv.status,
+      amount: (inv.amount_due ?? 0) / 100,
+      currency: inv.currency,
+      customerEmail: inv.customer_email,
+      created: inv.created,
+      dueDate: inv.due_date,
+    }));
+  }),
+
+  webhookEvents: protectedProcedure
+    .input(z.object({ limit: z.number().optional() }))
+    .query(async ({ input }) => getWebhookEvents(input.limit ?? 50)),
+});
+
+const stripeDataRouter = router({
+  customers: protectedProcedure
+    .input(z.object({ limit: z.number().optional(), email: z.string().optional(), starting_after: z.string().optional() }))
+    .query(async ({ input }) => {
+      const params: Record<string, unknown> = { limit: input.limit ?? 20 };
+      if (input.email) params.email = input.email;
+      if (input.starting_after) params.starting_after = input.starting_after;
+      const result = await stripe.customers.list(params as Parameters<typeof stripe.customers.list>[0]);
+      return { data: result.data, has_more: result.has_more };
+    }),
+
+  products: protectedProcedure
+    .input(z.object({ limit: z.number().optional(), active: z.boolean().optional() }))
+    .query(async ({ input }) => {
+      const params: Record<string, unknown> = { limit: input.limit ?? 20 };
+      if (input.active !== undefined) params.active = input.active;
+      return stripe.products.list(params as Parameters<typeof stripe.products.list>[0]);
+    }),
+
+  prices: protectedProcedure
+    .input(z.object({ limit: z.number().optional(), product: z.string().optional() }))
+    .query(async ({ input }) => {
+      const params: Record<string, unknown> = { limit: input.limit ?? 20 };
+      if (input.product) params.product = input.product;
+      return stripe.prices.list(params as Parameters<typeof stripe.prices.list>[0]);
+    }),
+
+  subscriptions: protectedProcedure
+    .input(z.object({ limit: z.number().optional(), status: z.string().optional(), customer: z.string().optional() }))
+    .query(async ({ input }) => {
+      const params: Record<string, unknown> = { limit: input.limit ?? 20 };
+      if (input.status) params.status = input.status;
+      if (input.customer) params.customer = input.customer;
+      return stripe.subscriptions.list(params as Parameters<typeof stripe.subscriptions.list>[0]);
+    }),
+
+  invoices: protectedProcedure
+    .input(z.object({ limit: z.number().optional(), status: z.string().optional(), customer: z.string().optional() }))
+    .query(async ({ input }) => {
+      const params: Record<string, unknown> = { limit: input.limit ?? 20 };
+      if (input.status) params.status = input.status;
+      if (input.customer) params.customer = input.customer;
+      return stripe.invoices.list(params as Parameters<typeof stripe.invoices.list>[0]);
+    }),
+
+  payments: protectedProcedure
+    .input(z.object({ limit: z.number().optional(), customer: z.string().optional() }))
+    .query(async ({ input }) => {
+      const params: Record<string, unknown> = { limit: input.limit ?? 20 };
+      if (input.customer) params.customer = input.customer;
+      return stripe.charges.list(params as Parameters<typeof stripe.charges.list>[0]);
+    }),
+});
 
 export const appRouter = router({
-    // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
   system: systemRouter,
   auth: router({
-    me: publicProcedure.query(opts => opts.ctx.user),
+    me: publicProcedure.query((opts) => opts.ctx.user),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
-      return {
-        success: true,
-      } as const;
+      return { success: true } as const;
     }),
   }),
-
-  // TODO: add feature routers here, e.g.
-  // todo: router({
-  //   list: protectedProcedure.query(({ ctx }) =>
-  //     db.getUserTodos(ctx.user.id)
-  //   ),
-  // }),
+  agent: agentRouter,
+  chat: chatRouter,
+  dashboard: dashboardRouter,
+  stripeData: stripeDataRouter,
 });
 
 export type AppRouter = typeof appRouter;

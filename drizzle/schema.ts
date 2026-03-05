@@ -1,4 +1,4 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, json } from "drizzle-orm/mysql-core";
 
 /**
  * Core user table backing auth flow.
@@ -25,4 +25,40 @@ export const users = mysqlTable("users", {
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 
-// TODO: Add your tables here
+// Chat sessions for conversation history
+export const chatSessions = mysqlTable("chat_sessions", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  title: varchar("title", { length: 255 }).notNull().default("New Conversation"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type ChatSession = typeof chatSessions.$inferSelect;
+
+// Individual chat messages
+export const chatMessages = mysqlTable("chat_messages", {
+  id: int("id").autoincrement().primaryKey(),
+  sessionId: int("sessionId").notNull(),
+  role: mysqlEnum("role", ["user", "assistant", "tool"]).notNull(),
+  content: text("content").notNull(),
+  toolName: varchar("toolName", { length: 128 }),
+  toolResult: json("toolResult"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type ChatMessage = typeof chatMessages.$inferSelect;
+
+// Stripe webhook events log
+export const webhookEvents = mysqlTable("webhook_events", {
+  id: int("id").autoincrement().primaryKey(),
+  stripeEventId: varchar("stripeEventId", { length: 128 }).notNull().unique(),
+  eventType: varchar("eventType", { length: 128 }).notNull(),
+  objectId: varchar("objectId", { length: 128 }),
+  objectType: varchar("objectType", { length: 64 }),
+  status: mysqlEnum("status", ["received", "processed", "failed"]).default("received").notNull(),
+  payload: json("payload"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type WebhookEvent = typeof webhookEvents.$inferSelect;

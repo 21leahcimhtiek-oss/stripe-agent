@@ -21,15 +21,21 @@ import {
 } from "@/components/ui/sidebar";
 import { getLoginUrl } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
-import { LayoutDashboard, LogOut, PanelLeft, Users } from "lucide-react";
+import { LayoutDashboard, LogOut, PanelLeft, Users, MessageSquare, Package, CreditCard, FileText, Zap, RefreshCw, Webhook } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
 import { Button } from "./ui/button";
 
 const menuItems = [
-  { icon: LayoutDashboard, label: "Page 1", path: "/" },
-  { icon: Users, label: "Page 2", path: "/some-path" },
+  { icon: LayoutDashboard, label: "Dashboard", path: "/" },
+  { icon: MessageSquare, label: "AI Agent Chat", path: "/chat" },
+  { icon: Users, label: "Customers", path: "/customers" },
+  { icon: Package, label: "Products & Prices", path: "/products" },
+  { icon: RefreshCw, label: "Subscriptions", path: "/subscriptions" },
+  { icon: FileText, label: "Invoices", path: "/invoices" },
+  { icon: CreditCard, label: "Payments", path: "/payments" },
+  { icon: Webhook, label: "Webhooks", path: "/webhooks" },
 ];
 
 const SIDEBAR_WIDTH_KEY = "sidebar-width";
@@ -170,11 +176,18 @@ function DashboardLayoutContent({
               </button>
               {!isCollapsed ? (
                 <div className="flex items-center gap-2 min-w-0">
-                  <span className="font-semibold tracking-tight truncate">
-                    Navigation
+                  <div className="h-6 w-6 rounded bg-primary flex items-center justify-center shrink-0">
+                    <Zap className="h-3.5 w-3.5 text-primary-foreground" />
+                  </div>
+                  <span className="font-semibold tracking-tight truncate text-foreground">
+                    StripeAgent
                   </span>
                 </div>
-              ) : null}
+              ) : (
+                <div className="h-6 w-6 rounded bg-primary flex items-center justify-center">
+                  <Zap className="h-3.5 w-3.5 text-primary-foreground" />
+                </div>
+              )}
             </div>
           </SidebarHeader>
 
@@ -257,7 +270,7 @@ function DashboardLayoutContent({
             </div>
           </div>
         )}
-        <main className="flex-1 p-4">{children}</main>
+        <main className="flex-1 p-6 min-h-screen">{children}</main>
       </SidebarInset>
     </>
   );
