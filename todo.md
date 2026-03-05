@@ -51,3 +51,31 @@
 - [ ] Claim Stripe sandbox at https://dashboard.stripe.com/claim_sandbox/...
 - [ ] Configure webhook URL in Stripe Dashboard → Webhooks
 - [ ] Add live Stripe keys after KYC verification (Settings → Payment)
+
+## Expanded Stripe Tools (Round 2)
+- [ ] Disputes: list, retrieve, update disputes
+- [ ] Payment Methods: list, retrieve, attach, detach
+- [ ] Transfers & Payouts: create transfer, list transfers, list payouts
+- [ ] Tax Rates: create, list, retrieve tax rates
+- [ ] Checkout Sessions: create, list, retrieve, expire sessions
+- [ ] Payment Links: create, list, update payment links
+- [ ] Promotion Codes: create, list promotion codes
+- [ ] Credit Notes: create, list credit notes
+- [ ] Webhook Endpoints: list, create, delete webhook endpoints
+- [ ] Customer Portal Sessions: create billing portal session
+- [ ] Setup Intents: create, list setup intents
+- [ ] Stripe Search API: search customers, subscriptions, invoices, charges
+
+## Expanded Stripe Frontend Pages
+- [ ] Disputes page
+- [ ] Payment Links page
+- [ ] Checkout Sessions page
+- [ ] Promotions & Coupons page
+- [ ] Transfers & Payouts page
+
+## GitHub File Editor
+- [ ] Install Monaco editor (@monaco-editor/react)
+- [ ] GitHub File Editor page with directory browser + Monaco editor
+- [ ] Commit changes directly from editor via github_create_or_update_file tool
+- [ ] Register /github/editor route in App.tsx
+- [ ] Add File Editor to GitHub sidebar section

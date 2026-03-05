@@ -16,6 +16,13 @@ import Webhooks from "./pages/Webhooks";
 import GitHubRepos from "./pages/GitHubRepos";
 import GitHubIssues from "./pages/GitHubIssues";
 import GitHubPRs from "./pages/GitHubPRs";
+import GitHubEditor from "./pages/GitHubEditor";
+import Disputes from "./pages/Disputes";
+import PaymentLinks from "./pages/PaymentLinks";
+import CheckoutSessions from "./pages/CheckoutSessions";
+import Promotions from "./pages/Promotions";
+import Transfers from "./pages/Transfers";
+import TaxRates from "./pages/TaxRates";
 
 function Router() {
   return (
@@ -30,9 +37,16 @@ function Router() {
         <Route path="/invoices" component={Invoices} />
         <Route path="/payments" component={Payments} />
         <Route path="/webhooks" component={Webhooks} />
+        <Route path="/disputes" component={Disputes} />
+        <Route path="/payment-links" component={PaymentLinks} />
+        <Route path="/checkout-sessions" component={CheckoutSessions} />
+        <Route path="/promotions" component={Promotions} />
+        <Route path="/transfers" component={Transfers} />
+        <Route path="/tax-rates" component={TaxRates} />
         <Route path="/github/repos" component={GitHubRepos} />
         <Route path="/github/issues" component={GitHubIssues} />
         <Route path="/github/prs" component={GitHubPRs} />
+        <Route path="/github/editor" component={GitHubEditor} />
         <Route path="/404" component={NotFound} />
         <Route component={NotFound} />
       </Switch>

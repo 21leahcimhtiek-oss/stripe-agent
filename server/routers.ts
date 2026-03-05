@@ -282,6 +282,74 @@ const stripeDataRouter = router({
       if (input.customer) params.customer = input.customer;
       return stripe.charges.list(params as Parameters<typeof stripe.charges.list>[0]);
     }),
+
+  disputes: protectedProcedure
+    .input(z.object({ limit: z.number().optional(), status: z.string().optional() }))
+    .query(async ({ input }) => {
+      const params: Record<string, unknown> = { limit: input.limit ?? 20 };
+      if (input.status) params.status = input.status;
+      return stripe.disputes.list(params as Parameters<typeof stripe.disputes.list>[0]);
+    }),
+
+  paymentLinks: protectedProcedure
+    .input(z.object({ limit: z.number().optional(), active: z.boolean().optional() }))
+    .query(async ({ input }) => {
+      const params: Record<string, unknown> = { limit: input.limit ?? 20 };
+      if (input.active !== undefined) params.active = input.active;
+      return stripe.paymentLinks.list(params as Parameters<typeof stripe.paymentLinks.list>[0]);
+    }),
+
+  checkoutSessions: protectedProcedure
+    .input(z.object({ limit: z.number().optional(), status: z.string().optional() }))
+    .query(async ({ input }) => {
+      const params: Record<string, unknown> = { limit: input.limit ?? 20 };
+      if (input.status) params.status = input.status;
+      return stripe.checkout.sessions.list(params as Parameters<typeof stripe.checkout.sessions.list>[0]);
+    }),
+
+  promotionCodes: protectedProcedure
+    .input(z.object({ limit: z.number().optional(), active: z.boolean().optional() }))
+    .query(async ({ input }) => {
+      const params: Record<string, unknown> = { limit: input.limit ?? 20 };
+      if (input.active !== undefined) params.active = input.active;
+      return stripe.promotionCodes.list(params as Parameters<typeof stripe.promotionCodes.list>[0]);
+    }),
+
+  coupons: protectedProcedure
+    .input(z.object({ limit: z.number().optional() }))
+    .query(async ({ input }) => stripe.coupons.list({ limit: input.limit ?? 20 })),
+
+  transfers: protectedProcedure
+    .input(z.object({ limit: z.number().optional() }))
+    .query(async ({ input }) => stripe.transfers.list({ limit: input.limit ?? 20 })),
+
+  payouts: protectedProcedure
+    .input(z.object({ limit: z.number().optional(), status: z.string().optional() }))
+    .query(async ({ input }) => {
+      const params: Record<string, unknown> = { limit: input.limit ?? 20 };
+      if (input.status) params.status = input.status;
+      return stripe.payouts.list(params as Parameters<typeof stripe.payouts.list>[0]);
+    }),
+
+  taxRates: protectedProcedure
+    .input(z.object({ limit: z.number().optional(), active: z.boolean().optional() }))
+    .query(async ({ input }) => {
+      const params: Record<string, unknown> = { limit: input.limit ?? 20 };
+      if (input.active !== undefined) params.active = input.active;
+      return stripe.taxRates.list(params as Parameters<typeof stripe.taxRates.list>[0]);
+    }),
+
+  setupIntents: protectedProcedure
+    .input(z.object({ limit: z.number().optional(), customer: z.string().optional() }))
+    .query(async ({ input }) => {
+      const params: Record<string, unknown> = { limit: input.limit ?? 20 };
+      if (input.customer) params.customer = input.customer;
+      return stripe.setupIntents.list(params as Parameters<typeof stripe.setupIntents.list>[0]);
+    }),
+
+  webhookEndpoints: protectedProcedure.query(async () =>
+    stripe.webhookEndpoints.list({ limit: 20 })
+  ),
 });
 
 const githubDataRouter = router({
@@ -318,6 +386,38 @@ const githubDataRouter = router({
     const res = await octokit.rest.users.getAuthenticated();
     return { login: res.data.login, name: res.data.name, avatar_url: res.data.avatar_url, public_repos: res.data.public_repos, followers: res.data.followers, html_url: res.data.html_url };
   }),
+
+  getFile: protectedProcedure
+    .input(z.object({ owner: z.string(), repo: z.string(), path: z.string(), ref: z.string().optional() }))
+    .query(async ({ input }) => {
+      const octokit = getOctokit();
+      const res = await octokit.rest.repos.getContent({ owner: input.owner, repo: input.repo, path: input.path, ref: input.ref });
+      const data = res.data as { type: string; content?: string; sha: string; encoding?: string; size: number; name: string };
+      if (data.type !== "file") throw new Error("Path is not a file");
+      return { content: data.content ?? "", sha: data.sha, encoding: data.encoding ?? "base64", size: data.size, name: data.name };
+    }),
+
+  updateFile: protectedProcedure
+    .input(z.object({ owner: z.string(), repo: z.string(), path: z.string(), content: z.string(), message: z.string(), sha: z.string(), branch: z.string().optional() }))
+    .mutation(async ({ input }) => {
+      const octokit = getOctokit();
+      const res = await octokit.rest.repos.createOrUpdateFileContents({
+        owner: input.owner, repo: input.repo, path: input.path,
+        message: input.message, content: input.content, sha: input.sha,
+        branch: input.branch,
+      });
+      return { commit: { sha: res.data.commit.sha, message: res.data.commit.message, html_url: res.data.commit.html_url } };
+    }),
+
+  listDir: protectedProcedure
+    .input(z.object({ owner: z.string(), repo: z.string(), path: z.string().optional(), ref: z.string().optional() }))
+    .query(async ({ input }) => {
+      const octokit = getOctokit();
+      const res = await octokit.rest.repos.getContent({ owner: input.owner, repo: input.repo, path: input.path ?? "", ref: input.ref });
+      const data = res.data;
+      if (!Array.isArray(data)) throw new Error("Path is not a directory");
+      return data.map((item: { type: string; name: string; path: string; size: number; sha: string }) => ({ type: item.type, name: item.name, path: item.path, size: item.size, sha: item.sha }));
+    }),
 });
 
 export const appRouter = router({

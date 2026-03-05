@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/sidebar";
 import { getLoginUrl } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
-import { LayoutDashboard, LogOut, PanelLeft, Users, MessageSquare, Package, CreditCard, FileText, Zap, RefreshCw, Webhook, Github, GitPullRequest, AlertCircle } from "lucide-react";
+import { LayoutDashboard, LogOut, PanelLeft, Users, MessageSquare, Package, CreditCard, FileText, Zap, RefreshCw, Webhook, Github, GitPullRequest, AlertCircle, ShieldAlert, Link2, ShoppingCart, Tag, ArrowRightLeft, Receipt, Code2 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
@@ -38,13 +38,23 @@ const stripeMenuItems = [
   { icon: Webhook, label: "Webhooks", path: "/webhooks" },
 ];
 
+const stripeExtendedItems = [
+  { icon: ShieldAlert, label: "Disputes", path: "/disputes" },
+  { icon: Link2, label: "Payment Links", path: "/payment-links" },
+  { icon: ShoppingCart, label: "Checkout Sessions", path: "/checkout-sessions" },
+  { icon: Tag, label: "Promotions", path: "/promotions" },
+  { icon: ArrowRightLeft, label: "Transfers & Payouts", path: "/transfers" },
+  { icon: Receipt, label: "Tax Rates", path: "/tax-rates" },
+];
+
 const githubMenuItems = [
   { icon: Github, label: "Repositories", path: "/github/repos" },
   { icon: AlertCircle, label: "Issues", path: "/github/issues" },
   { icon: GitPullRequest, label: "Pull Requests", path: "/github/prs" },
+  { icon: Code2, label: "File Editor", path: "/github/editor" },
 ];
 
-const menuItems = [...stripeMenuItems, ...githubMenuItems];
+const menuItems = [...stripeMenuItems, ...stripeExtendedItems, ...githubMenuItems];
 
 const SIDEBAR_WIDTH_KEY = "sidebar-width";
 const DEFAULT_WIDTH = 280;
@@ -206,6 +216,28 @@ function DashboardLayoutContent({
             </div>
             <SidebarMenu className="px-2 pb-1">
               {stripeMenuItems.map(item => {
+                const isActive = location === item.path || location.startsWith(item.path + "?");
+                return (
+                  <SidebarMenuItem key={item.path}>
+                    <SidebarMenuButton
+                      isActive={isActive}
+                      onClick={() => setLocation(item.path)}
+                      tooltip={item.label}
+                      className={`h-9 transition-all font-normal`}
+                    >
+                      <item.icon className={`h-4 w-4 ${isActive ? "text-primary" : ""}`} />
+                      <span>{item.label}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
+            </SidebarMenu>
+            {/* Stripe Extended Section */}
+            <div className="px-3 pt-2 pb-1">
+              {!isCollapsed && <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 px-2 mb-1">Billing & Finance</p>}
+            </div>
+            <SidebarMenu className="px-2 pb-1">
+              {stripeExtendedItems.map(item => {
                 const isActive = location === item.path || location.startsWith(item.path + "?");
                 return (
                   <SidebarMenuItem key={item.path}>
