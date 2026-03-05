@@ -13,6 +13,9 @@ import Subscriptions from "./pages/Subscriptions";
 import Invoices from "./pages/Invoices";
 import Payments from "./pages/Payments";
 import Webhooks from "./pages/Webhooks";
+import GitHubRepos from "./pages/GitHubRepos";
+import GitHubIssues from "./pages/GitHubIssues";
+import GitHubPRs from "./pages/GitHubPRs";
 
 function Router() {
   return (
@@ -27,6 +30,9 @@ function Router() {
         <Route path="/invoices" component={Invoices} />
         <Route path="/payments" component={Payments} />
         <Route path="/webhooks" component={Webhooks} />
+        <Route path="/github/repos" component={GitHubRepos} />
+        <Route path="/github/issues" component={GitHubIssues} />
+        <Route path="/github/prs" component={GitHubPRs} />
         <Route path="/404" component={NotFound} />
         <Route component={NotFound} />
       </Switch>

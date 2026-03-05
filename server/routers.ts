@@ -17,10 +17,14 @@ import {
 } from "./db";
 import stripe from "./stripe";
 import { STRIPE_TOOLS, executeStripeTool } from "./stripeTools";
+import { GITHUB_TOOLS, executeGitHubTool } from "./githubTools";
+import { getOctokit } from "./github";
 
-const SYSTEM_PROMPT = `You are StripeAgent, an expert AI assistant for managing Stripe payment infrastructure. You help users control their Stripe account through natural language.
+const ALL_TOOLS = [...STRIPE_TOOLS, ...GITHUB_TOOLS] as unknown as Parameters<typeof invokeLLM>[0]["tools"];
 
-You have access to the following Stripe capabilities:
+const SYSTEM_PROMPT = `You are StripeAgent, a powerful AI assistant that manages both Stripe payment infrastructure AND GitHub repositories through natural language.
+
+## Stripe Capabilities
 - Customer management: create, list, search, update, delete customers
 - Product & pricing catalog: create products, set one-time or recurring prices
 - Subscription lifecycle: create, cancel, pause, resume subscriptions
@@ -29,13 +33,26 @@ You have access to the following Stripe capabilities:
 - Account balance: check current balance
 - Coupons & discounts: create and list coupons
 
-Guidelines:
-- Always confirm destructive actions (delete, cancel, void) before executing them
+## GitHub Capabilities
+- Repository management: list, create, delete, fork, star repos
+- Issue tracking: create, list, update, close issues; add comments
+- Pull requests: list, create, review, merge PRs
+- Branch management: list, create, delete branches
+- File operations: read files, list directories, create/update files with commits
+- Commit history: list commits, inspect specific commits with diffs
+- Releases & tags: list and create releases
+- Search: search repos, code, and issues across GitHub
+- Statistics: contributors, language breakdown, participation stats
+- Labels: list and create labels
+
+## Guidelines
+- Always confirm destructive actions (delete repo, cancel subscription, void invoice) before executing
 - Present monetary amounts in human-readable format (e.g., $9.99 not 999)
-- When listing results, format them as clean tables or structured lists
+- Format lists as clean tables or structured markdown
 - If an operation fails, explain the error clearly and suggest alternatives
-- For IDs, always show them so users can reference them in follow-up commands
+- For IDs and SHAs, always show them so users can reference them in follow-up commands
 - Be proactive: after creating a resource, offer logical next steps
+- When working with GitHub, infer the owner from context or ask if ambiguous
 - Keep responses concise but complete`;
 
 const agentRouter = router({
@@ -62,7 +79,7 @@ const agentRouter = router({
         iterations++;
         const response = await invokeLLM({
           messages,
-          tools: STRIPE_TOOLS as unknown as Parameters<typeof invokeLLM>[0]["tools"],
+          tools: ALL_TOOLS,
           tool_choice: "auto",
         });
 
@@ -85,7 +102,11 @@ const agentRouter = router({
           let toolResult: unknown;
           let toolResultStr: string;
           try {
-            toolResult = await executeStripeTool(toolName, toolArgs);
+            if (toolName.startsWith("github_")) {
+              toolResult = await executeGitHubTool(toolName, toolArgs);
+            } else {
+              toolResult = await executeStripeTool(toolName, toolArgs);
+            }
             toolResultStr = JSON.stringify(toolResult, null, 2);
             toolCallLog.push({ name: toolName, result: toolResult });
           } catch (err: unknown) {
@@ -263,6 +284,42 @@ const stripeDataRouter = router({
     }),
 });
 
+const githubDataRouter = router({
+  repos: protectedProcedure
+    .input(z.object({ owner: z.string().optional(), type: z.string().optional(), per_page: z.number().optional() }))
+    .query(async ({ input }) => {
+      const octokit = getOctokit();
+      if (input.owner) {
+        const res = await octokit.rest.repos.listForUser({ username: input.owner, type: (input.type as "all" | "owner" | "member") || "all", per_page: input.per_page || 30 });
+        return res.data.map(r => ({ id: r.id, name: r.name, full_name: r.full_name, description: r.description, private: r.private, language: r.language, stars: r.stargazers_count, forks: r.forks_count, updated_at: r.updated_at, html_url: r.html_url, open_issues_count: r.open_issues_count }));
+      }
+      const res = await octokit.rest.repos.listForAuthenticatedUser({ type: (input.type as "all" | "owner" | "public" | "private" | "member") || "all", per_page: input.per_page || 30, sort: "updated" });
+      return res.data.map(r => ({ id: r.id, name: r.name, full_name: r.full_name, description: r.description, private: r.private, language: r.language, stars: r.stargazers_count, forks: r.forks_count, updated_at: r.updated_at, html_url: r.html_url, open_issues_count: r.open_issues_count }));
+    }),
+
+  issues: protectedProcedure
+    .input(z.object({ owner: z.string(), repo: z.string(), state: z.string().optional(), per_page: z.number().optional() }))
+    .query(async ({ input }) => {
+      const octokit = getOctokit();
+      const res = await octokit.rest.issues.listForRepo({ owner: input.owner, repo: input.repo, state: (input.state as "open" | "closed" | "all") || "open", per_page: input.per_page || 20 });
+      return res.data.filter(i => !i.pull_request).map(i => ({ number: i.number, title: i.title, state: i.state, labels: i.labels.map((l: unknown) => (typeof l === "string" ? l : (l as { name?: string }).name)), created_at: i.created_at, updated_at: i.updated_at, html_url: i.html_url, comments: i.comments, user: i.user?.login }));
+    }),
+
+  prs: protectedProcedure
+    .input(z.object({ owner: z.string(), repo: z.string(), state: z.string().optional(), per_page: z.number().optional() }))
+    .query(async ({ input }) => {
+      const octokit = getOctokit();
+      const res = await octokit.rest.pulls.list({ owner: input.owner, repo: input.repo, state: (input.state as "open" | "closed" | "all") || "open", per_page: input.per_page || 20 });
+      return res.data.map(p => ({ number: p.number, title: p.title, state: p.state, draft: p.draft, head: p.head.ref, base: p.base.ref, user: p.user?.login, created_at: p.created_at, updated_at: p.updated_at, html_url: p.html_url }));
+    }),
+
+  currentUser: protectedProcedure.query(async () => {
+    const octokit = getOctokit();
+    const res = await octokit.rest.users.getAuthenticated();
+    return { login: res.data.login, name: res.data.name, avatar_url: res.data.avatar_url, public_repos: res.data.public_repos, followers: res.data.followers, html_url: res.data.html_url };
+  }),
+});
+
 export const appRouter = router({
   system: systemRouter,
   auth: router({
@@ -277,6 +334,7 @@ export const appRouter = router({
   chat: chatRouter,
   dashboard: dashboardRouter,
   stripeData: stripeDataRouter,
+  githubData: githubDataRouter,
 });
 
 export type AppRouter = typeof appRouter;

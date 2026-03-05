@@ -16,7 +16,7 @@
 
 ## Phase 3: Frontend
 - [x] Global theme: dark professional financial design (index.css)
-- [x] DashboardLayout with StripeAgent branding and 8-item sidebar navigation
+- [x] DashboardLayout with StripeAgent branding and sidebar navigation (Stripe + GitHub sections)
 - [x] Dashboard home page with key metrics (MRR, customers, subscriptions, balance, recent activity)
 - [x] Chat page with AI conversation interface, session sidebar, quick suggestions
 - [x] Customers page with list/search/table view
@@ -25,13 +25,27 @@
 - [x] Invoices page with status, amount, due date
 - [x] Payments & Refunds page with charge history
 - [x] Webhook events log page with event type color coding
-- [x] App.tsx routing with all 8 pages
+- [x] App.tsx routing with all pages
 
 ## Phase 4: Polish & Tests
 - [x] Vitest tests for agent router (8 tests passing)
 - [x] Error handling and loading states on all pages
 - [x] Quick AI action buttons on all data pages
 - [x] Status badges with color coding across all pages
+
+## GitHub Integration
+- [x] Push project to GitHub repository (21leahcimhtiek-oss/stripe-agent)
+- [x] GitHub Octokit client singleton (server/github.ts)
+- [x] 30 GitHub tool functions: repos, issues, PRs, branches, files, commits, releases, search, labels, stats
+- [x] GitHub tools integrated into AI agent router (alongside Stripe tools)
+- [x] AI system prompt updated to include GitHub capabilities
+- [x] githubData tRPC router (repos, issues, PRs, currentUser)
+- [x] GitHub Repos page with user card, filtering, and language colors
+- [x] GitHub Issues page with repo selector and state filter
+- [x] GitHub Pull Requests page with merge actions
+- [x] GitHub section added to sidebar navigation
+- [x] GitHub routes registered in App.tsx
+- [x] 15 vitest tests for GitHub tools (23 total passing)
 
 ## Pending (User Actions Required)
 - [ ] Claim Stripe sandbox at https://dashboard.stripe.com/claim_sandbox/...

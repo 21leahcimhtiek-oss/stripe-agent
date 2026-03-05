@@ -21,13 +21,13 @@ import {
 } from "@/components/ui/sidebar";
 import { getLoginUrl } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
-import { LayoutDashboard, LogOut, PanelLeft, Users, MessageSquare, Package, CreditCard, FileText, Zap, RefreshCw, Webhook } from "lucide-react";
+import { LayoutDashboard, LogOut, PanelLeft, Users, MessageSquare, Package, CreditCard, FileText, Zap, RefreshCw, Webhook, Github, GitPullRequest, AlertCircle } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
 import { Button } from "./ui/button";
 
-const menuItems = [
+const stripeMenuItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/" },
   { icon: MessageSquare, label: "AI Agent Chat", path: "/chat" },
   { icon: Users, label: "Customers", path: "/customers" },
@@ -37,6 +37,14 @@ const menuItems = [
   { icon: CreditCard, label: "Payments", path: "/payments" },
   { icon: Webhook, label: "Webhooks", path: "/webhooks" },
 ];
+
+const githubMenuItems = [
+  { icon: Github, label: "Repositories", path: "/github/repos" },
+  { icon: AlertCircle, label: "Issues", path: "/github/issues" },
+  { icon: GitPullRequest, label: "Pull Requests", path: "/github/prs" },
+];
+
+const menuItems = [...stripeMenuItems, ...githubMenuItems];
 
 const SIDEBAR_WIDTH_KEY = "sidebar-width";
 const DEFAULT_WIDTH = 280;
@@ -118,7 +126,7 @@ function DashboardLayoutContent({
   const isCollapsed = state === "collapsed";
   const [isResizing, setIsResizing] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
-  const activeMenuItem = menuItems.find(item => item.path === location);
+  const activeMenuItem = menuItems.find(item => location === item.path || location.startsWith(item.path + "?"));
   const isMobile = useIsMobile();
 
   useEffect(() => {
@@ -191,21 +199,45 @@ function DashboardLayoutContent({
             </div>
           </SidebarHeader>
 
-          <SidebarContent className="gap-0">
-            <SidebarMenu className="px-2 py-1">
-              {menuItems.map(item => {
-                const isActive = location === item.path;
+          <SidebarContent className="gap-0 overflow-y-auto">
+            {/* Stripe Section */}
+            <div className="px-3 pt-3 pb-1">
+              {!isCollapsed && <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 px-2 mb-1">Stripe</p>}
+            </div>
+            <SidebarMenu className="px-2 pb-1">
+              {stripeMenuItems.map(item => {
+                const isActive = location === item.path || location.startsWith(item.path + "?");
                 return (
                   <SidebarMenuItem key={item.path}>
                     <SidebarMenuButton
                       isActive={isActive}
                       onClick={() => setLocation(item.path)}
                       tooltip={item.label}
-                      className={`h-10 transition-all font-normal`}
+                      className={`h-9 transition-all font-normal`}
                     >
-                      <item.icon
-                        className={`h-4 w-4 ${isActive ? "text-primary" : ""}`}
-                      />
+                      <item.icon className={`h-4 w-4 ${isActive ? "text-primary" : ""}`} />
+                      <span>{item.label}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
+            </SidebarMenu>
+            {/* GitHub Section */}
+            <div className="px-3 pt-3 pb-1">
+              {!isCollapsed && <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 px-2 mb-1">GitHub</p>}
+            </div>
+            <SidebarMenu className="px-2 pb-2">
+              {githubMenuItems.map(item => {
+                const isActive = location === item.path || location.startsWith(item.path + "?");
+                return (
+                  <SidebarMenuItem key={item.path}>
+                    <SidebarMenuButton
+                      isActive={isActive}
+                      onClick={() => setLocation(item.path)}
+                      tooltip={item.label}
+                      className={`h-9 transition-all font-normal`}
+                    >
+                      <item.icon className={`h-4 w-4 ${isActive ? "text-primary" : ""}`} />
                       <span>{item.label}</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
