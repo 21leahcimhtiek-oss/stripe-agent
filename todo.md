@@ -79,3 +79,12 @@
 - [ ] Commit changes directly from editor via github_create_or_update_file tool
 - [ ] Register /github/editor route in App.tsx
 - [ ] Add File Editor to GitHub sidebar section
+
+## Round 3 Features
+- [ ] MRR revenue chart on Dashboard (Recharts LineChart + Stripe invoices by month)
+- [ ] GitHub Commit History page (timeline, author avatar, diff stats, branch selector)
+- [ ] Cross-platform Workflows page (pre-built Stripe+GitHub automation templates)
+- [ ] Add Commit History and Workflows to sidebar nav
+- [ ] Register new routes in App.tsx
+- [ ] Write tests for new router procedures
+- [ ] Push to GitHub and save checkpoint

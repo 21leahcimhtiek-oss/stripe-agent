@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/sidebar";
 import { getLoginUrl } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
-import { LayoutDashboard, LogOut, PanelLeft, Users, MessageSquare, Package, CreditCard, FileText, Zap, RefreshCw, Webhook, Github, GitPullRequest, AlertCircle, ShieldAlert, Link2, ShoppingCart, Tag, ArrowRightLeft, Receipt, Code2 } from "lucide-react";
+import { LayoutDashboard, LogOut, PanelLeft, Users, MessageSquare, Package, CreditCard, FileText, Zap, RefreshCw, Webhook, Github, GitPullRequest, AlertCircle, ShieldAlert, Link2, ShoppingCart, Tag, ArrowRightLeft, Receipt, Code2, GitCommit, Workflow } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
@@ -30,6 +30,7 @@ import { Button } from "./ui/button";
 const stripeMenuItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/" },
   { icon: MessageSquare, label: "AI Agent Chat", path: "/chat" },
+  { icon: Workflow, label: "Workflows", path: "/workflows" },
   { icon: Users, label: "Customers", path: "/customers" },
   { icon: Package, label: "Products & Prices", path: "/products" },
   { icon: RefreshCw, label: "Subscriptions", path: "/subscriptions" },
@@ -51,6 +52,7 @@ const githubMenuItems = [
   { icon: Github, label: "Repositories", path: "/github/repos" },
   { icon: AlertCircle, label: "Issues", path: "/github/issues" },
   { icon: GitPullRequest, label: "Pull Requests", path: "/github/prs" },
+  { icon: GitCommit, label: "Commit History", path: "/github/commits" },
   { icon: Code2, label: "File Editor", path: "/github/editor" },
 ];
 

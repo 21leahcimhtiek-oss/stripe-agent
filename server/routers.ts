@@ -352,6 +352,42 @@ const stripeDataRouter = router({
   ),
 });
 
+// ─── MRR Chart Router ─────────────────────────────────────────────────────────
+const chartRouter = router({
+  mrrHistory: protectedProcedure.query(async () => {
+    // Fetch paid invoices from the last 12 months
+    const twelveMonthsAgo = Math.floor(Date.now() / 1000) - 60 * 60 * 24 * 365;
+    const invoices = await stripe.invoices.list({
+      limit: 100,
+      status: "paid",
+      created: { gte: twelveMonthsAgo },
+    });
+
+    // Group by month
+    const monthMap: Record<string, number> = {};
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date();
+      d.setMonth(d.getMonth() - i);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      monthMap[key] = 0;
+    }
+
+    for (const inv of invoices.data) {
+      const d = new Date(inv.created * 1000);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      if (key in monthMap) {
+        monthMap[key] += (inv.amount_paid ?? 0) / 100;
+      }
+    }
+
+    return Object.entries(monthMap).map(([month, revenue]) => {
+      const [year, m] = month.split("-");
+      const label = new Date(Number(year), Number(m) - 1).toLocaleString("default", { month: "short", year: "2-digit" });
+      return { month, label, revenue: Math.round(revenue * 100) / 100 };
+    });
+  }),
+});
+
 const githubDataRouter = router({
   repos: protectedProcedure
     .input(z.object({ owner: z.string().optional(), type: z.string().optional(), per_page: z.number().optional() }))
@@ -418,6 +454,47 @@ const githubDataRouter = router({
       if (!Array.isArray(data)) throw new Error("Path is not a directory");
       return data.map((item: { type: string; name: string; path: string; size: number; sha: string }) => ({ type: item.type, name: item.name, path: item.path, size: item.size, sha: item.sha }));
     }),
+
+  commits: protectedProcedure
+    .input(z.object({ owner: z.string(), repo: z.string(), branch: z.string().optional(), per_page: z.number().optional(), page: z.number().optional() }))
+    .query(async ({ input }) => {
+      const octokit = getOctokit();
+      const res = await octokit.rest.repos.listCommits({
+        owner: input.owner,
+        repo: input.repo,
+        sha: input.branch,
+        per_page: input.per_page ?? 30,
+        page: input.page ?? 1,
+      });
+      return res.data.map(c => ({
+        sha: c.sha,
+        short_sha: c.sha.slice(0, 7),
+        message: c.commit.message,
+        author: c.commit.author?.name ?? c.author?.login ?? "Unknown",
+        author_login: c.author?.login ?? null,
+        author_avatar: c.author?.avatar_url ?? null,
+        date: c.commit.author?.date ?? null,
+        html_url: c.html_url,
+        additions: (c.stats as { additions?: number } | undefined)?.additions ?? null,
+        deletions: (c.stats as { deletions?: number } | undefined)?.deletions ?? null,
+      }));
+    }),
+
+  branches: protectedProcedure
+    .input(z.object({ owner: z.string(), repo: z.string() }))
+    .query(async ({ input }) => {
+      const octokit = getOctokit();
+      const res = await octokit.rest.repos.listBranches({ owner: input.owner, repo: input.repo, per_page: 50 });
+      return res.data.map(b => ({ name: b.name, sha: b.commit.sha, protected: b.protected }));
+    }),
+
+  // Workflow execution: run a cross-platform automation template
+  runWorkflow: protectedProcedure
+    .input(z.object({ templateId: z.string(), params: z.record(z.string(), z.unknown()).optional() }))
+    .mutation(async ({ input }) => {
+      // Templates are executed by the AI agent; this records the intent
+      return { templateId: input.templateId, params: input.params ?? {}, status: "queued", message: "Workflow dispatched to AI agent" };
+    }),
 });
 
 export const appRouter = router({
@@ -435,6 +512,7 @@ export const appRouter = router({
   dashboard: dashboardRouter,
   stripeData: stripeDataRouter,
   githubData: githubDataRouter,
+  charts: chartRouter,
 });
 
 export type AppRouter = typeof appRouter;

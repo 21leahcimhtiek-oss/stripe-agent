@@ -17,6 +17,8 @@ import GitHubRepos from "./pages/GitHubRepos";
 import GitHubIssues from "./pages/GitHubIssues";
 import GitHubPRs from "./pages/GitHubPRs";
 import GitHubEditor from "./pages/GitHubEditor";
+import GitHubCommits from "./pages/GitHubCommits";
+import Workflows from "./pages/Workflows";
 import Disputes from "./pages/Disputes";
 import PaymentLinks from "./pages/PaymentLinks";
 import CheckoutSessions from "./pages/CheckoutSessions";
@@ -46,7 +48,9 @@ function Router() {
         <Route path="/github/repos" component={GitHubRepos} />
         <Route path="/github/issues" component={GitHubIssues} />
         <Route path="/github/prs" component={GitHubPRs} />
+        <Route path="/github/commits" component={GitHubCommits} />
         <Route path="/github/editor" component={GitHubEditor} />
+        <Route path="/workflows" component={Workflows} />
         <Route path="/404" component={NotFound} />
         <Route component={NotFound} />
       </Switch>
