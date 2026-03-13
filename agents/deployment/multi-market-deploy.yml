@@ -1,0 +1,360 @@
+# Multi-Market Deployment Agent
+# Automated deployment pipeline for Microsoft Store, Google Play, and Vercel
+
+name: "Multi-Market Deployment Agent"
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_market:
+        description: 'Target deployment market'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - microsoft-store
+          - google-play
+          - vercel
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+          - development
+      version:
+        description: 'App version to deploy (e.g., 1.0.0)'
+        required: false
+        type: string
+      skip_tests:
+        description: 'Skip pre-deployment tests'
+        required: false
+        default: false
+        type: boolean
+
+  push:
+    tags:
+      - 'v*.*.*'
+    branches:
+      - main
+      - master
+    paths:
+      - 'apps/**'
+      - 'packages/**'
+      - '.github/workflows/multi-market-deploy.yml'
+
+env:
+  NODE_VERSION: "20"
+  JAVA_VERSION: "17"
+  DOTNET_VERSION: "8.0.x"
+  RUBY_VERSION: "3.2"
+
+jobs:
+  # ===========================================
+  # PRE-DEPLOYMENT VALIDATION
+  # ===========================================
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      should_deploy_ms: ${{ steps.check.outputs.microsoft_store }}
+      should_deploy_gp: ${{ steps.check.outputs.google_play }}
+      should_deploy_vercel: ${{ steps.check.outputs.vercel }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          elif [ -n "${{ github.ref_name }}" ]; then
+            VERSION="${{ github.ref_name }}"
+            # Remove 'v' prefix if present
+            VERSION="${VERSION#v}"
+          else
+            VERSION=$(date +%Y.%m.%d)
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Deploying version: $VERSION"
+
+      - name: Check deployment targets
+        id: check
+        run: |
+          TARGET="${{ github.event.inputs.target_market || 'all' }}"
+          
+          if [ "$TARGET" = "all" ] || [ "$TARGET" = "microsoft-store" ]; then
+            echo "microsoft_store=true" >> $GITHUB_OUTPUT
+          else
+            echo "microsoft_store=false" >> $GITHUB_OUTPUT
+          fi
+          
+          if [ "$TARGET" = "all" ] || [ "$TARGET" = "google-play" ]; then
+            echo "google_play=true" >> $GITHUB_OUTPUT
+          else
+            echo "google_play=false" >> $GITHUB_OUTPUT
+          fi
+          
+          if [ "$TARGET" = "all" ] || [ "$TARGET" = "vercel" ]; then
+            echo "vercel=true" >> $GITHUB_OUTPUT
+          else
+            echo "vercel=false" >> $GITHUB_OUTPUT
+          fi
+
+  # ===========================================
+  # MICROSOFT STORE DEPLOYMENT (MSIX)
+  # ===========================================
+  deploy-microsoft-store:
+    needs: validate
+    if: needs.validate.outputs.should_deploy_ms == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    environment:
+      name: microsoft-store-production
+      url: https://apps.microsoft.com
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Install MSIX Packaging Tool
+        run: |
+          winget install Microsoft.MSIXPackagingTool --silent --accept-source-agreements --accept-package-agreements
+
+      - name: Restore NuGet packages
+        run: dotnet restore
+
+      - name: Build MSIX package
+        run: |
+          dotnet build -c Release -p:Platform=x64
+          dotnet msbuild -t:Package -p:Configuration=Release -p:Platform=x64
+
+      - name: Sign MSIX package
+        env:
+          AZURE_KEY_VAULT: ${{ secrets.AZURE_KEY_VAULT }}
+          AZURE_KEY_VAULT_CERTIFICATE: ${{ secrets.AZURE_KEY_VAULT_CERTIFICATE }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        run: |
+          # Sign with Azure Code Signing
+          dotnet tool install --global AzureSignTool
+          AzureSignTool sign -kvu "${{ secrets.AZURE_KEY_VAULT }}" -kvi "${{ secrets.AZURE_CLIENT_ID }}" -kvt "${{ secrets.AZURE_TENANT_ID }}" -kvs "${{ secrets.AZURE_CLIENT_SECRET }}" -kvc "${{ secrets.AZURE_KEY_VAULT_CERTIFICATE }}" -tr http://timestamp.digicert.com -td SHA256 -fd SHA256 "*.msix"
+
+      - name: Submit to Microsoft Store
+        env:
+          MS_STORE_TENANT_ID: ${{ secrets.MS_STORE_TENANT_ID }}
+          MS_STORE_CLIENT_ID: ${{ secrets.MS_STORE_CLIENT_ID }}
+          MS_STORE_CLIENT_SECRET: ${{ secrets.MS_STORE_CLIENT_SECRET }}
+        run: |
+          # Use Microsoft Store Submission API
+          $appId = "${{ secrets.MS_STORE_APP_ID }}"
+          $msixPath = Get-ChildItem -Filter "*.msix" -Recurse | Select-Object -First 1
+          
+          # Get access token
+          $tokenUrl = "https://login.microsoftonline.com/$MS_STORE_TENANT_ID/oauth2/token"
+          $body = @{
+            grant_type = "client_credentials"
+            client_id = $MS_STORE_CLIENT_ID
+            client_secret = $MS_STORE_CLIENT_SECRET
+            resource = "https://manage.devcenter.microsoft.com"
+          }
+          $token = (Invoke-RestMethod -Uri $tokenUrl -Method Post -Body $body).access_token
+          
+          # Create submission
+          $headers = @{ Authorization = "Bearer $token" }
+          $submissionUrl = "https://manage.devcenter.microsoft.com/v1.0/my/applications/$appId/submissions"
+          $submission = Invoke-RestMethod -Uri $submissionUrl -Method Post -Headers $headers
+          
+          # Upload package
+          Write-Host "Submission created: $($submission.id)"
+
+      - name: Upload MSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: msix-package
+          path: |
+            **/*.msix
+            **/*.msixbundle
+          retention-days: 30
+
+  # ===========================================
+  # GOOGLE PLAY DEPLOYMENT (AAB)
+  # ===========================================
+  deploy-google-play:
+    needs: validate
+    if: needs.validate.outputs.should_deploy_gp == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment:
+      name: google-play-production
+      url: https://play.google.com/store/apps/details?id=${{ secrets.ANDROID_PACKAGE_NAME }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: gradle
+
+      - name: Set up Ruby for Fastlane
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+
+      - name: Install Fastlane
+        run: |
+          gem install bundler
+          bundle add fastlane
+
+      - name: Decode Keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > android/app/release.keystore
+
+      - name: Build Release AAB
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          cd android
+          ./gradlew clean
+          ./gradlew bundleRelease -PversionName=${{ needs.validate.outputs.version }}
+
+      - name: Deploy to Google Play
+        env:
+          GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+          ANDROID_PACKAGE_NAME: ${{ secrets.ANDROID_PACKAGE_NAME }}
+        run: |
+          echo "$GOOGLE_PLAY_SERVICE_ACCOUNT_JSON" > google-play-service-account.json
+          
+          fastlane supply \
+            --aab android/app/build/outputs/bundle/release/app-release.aab \
+            --package_name "$ANDROID_PACKAGE_NAME" \
+            --track production \
+            --json_key google-play-service-account.json \
+            --skip_upload_metadata false \
+            --skip_upload_images false \
+            --skip_upload_screenshots false
+
+      - name: Upload AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aab-package
+          path: android/app/build/outputs/bundle/release/*.aab
+          retention-days: 30
+
+  # ===========================================
+  # VERCEL DEPLOYMENT
+  # ===========================================
+  deploy-vercel:
+    needs: validate
+    if: needs.validate.outputs.should_deploy_vercel == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: vercel-production
+      url: ${{ steps.deploy.outputs.url }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        if: github.event.inputs.skip_tests != 'true'
+        run: npm test
+
+      - name: Build application
+        run: npm run build
+
+      - name: Deploy to Vercel
+        id: deploy
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          # Install Vercel CLI
+          npm i -g vercel@latest
+          
+          # Pull Vercel environment information
+          vercel pull --yes --environment=production --token=$VERCEL_TOKEN
+          
+          # Build project artifacts
+          vercel build --prod --token=$VERCEL_TOKEN
+          
+          # Deploy to production
+          DEPLOYMENT_URL=$(vercel deploy --prebuilt --prod --token=$VERCEL_TOKEN)
+          
+          echo "url=$DEPLOYMENT_URL" >> $GITHUB_OUTPUT
+          echo "Deployed to: $DEPLOYMENT_URL"
+
+      - name: Verify deployment
+        run: |
+          DEPLOY_URL="${{ steps.deploy.outputs.url }}"
+          echo "Verifying deployment at $DEPLOY_URL"
+          curl -sSf "$DEPLOY_URL" > /dev/null && echo "Deployment successful!"
+
+      - name: Comment deployment URL
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '🚀 Deployed to Vercel: ${{ steps.deploy.outputs.url }}'
+            })
+
+  # ===========================================
+  # DEPLOYMENT SUMMARY
+  # ===========================================
+  summary:
+    needs: [validate, deploy-microsoft-store, deploy-google-play, deploy-vercel]
+    if: always()
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Create deployment summary
+        run: |
+          echo "## 🚀 Multi-Market Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Market | Status | Version |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|--------|---------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Microsoft Store | ${{ needs.deploy-microsoft-store.result || 'skipped' }} | ${{ needs.validate.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Google Play | ${{ needs.deploy-google-play.result || 'skipped' }} | ${{ needs.validate.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Vercel | ${{ needs.deploy-vercel.result || 'skipped' }} | ${{ needs.validate.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
