@@ -1,0 +1,258 @@
+# Free Deployment Platforms Workflow
+# Supports: Netlify, Render, Railway, Fly.io, Cloudflare Pages, Supabase
+
+name: "Free Platform Deployments"
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Deployment platform'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - netlify
+          - render
+          - railway
+          - flyio
+          - cloudflare-pages
+          - supabase
+      environment:
+        description: 'Environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - preview
+
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'apps/**'
+      - 'packages/**'
+
+env:
+  NODE_VERSION: "20"
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  # ===========================================
+  # NETLIFY DEPLOYMENT (Free Tier)
+  # ===========================================
+  deploy-netlify:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.platform == 'all' || github.event.inputs.platform == 'netlify'
+    environment:
+      name: netlify-${{ github.event.inputs.environment || 'production' }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build project
+        run: npm run build
+
+      - name: Install Netlify CLI
+        run: npm install -g netlify-cli
+
+      - name: Deploy to Netlify
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+        run: |
+          if [ "${{ github.event.inputs.environment }}" = "preview" ]; then
+            netlify deploy --dir=./dist --alias=${{ github.sha }}
+          else
+            netlify deploy --dir=./dist --prod
+          fi
+
+  # ===========================================
+  # RENDER DEPLOYMENT (Free Tier)
+  # ===========================================
+  deploy-render:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.platform == 'all' || github.event.inputs.platform == 'render'
+    environment:
+      name: render-${{ github.event.inputs.environment || 'production' }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build project
+        run: npm run build
+
+      - name: Trigger Render Deploy Hook
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          if [ -n "$RENDER_DEPLOY_HOOK" ]; then
+            curl -X POST "$RENDER_DEPLOY_HOOK"
+            echo "Render deployment triggered"
+          else
+            echo "RENDER_DEPLOY_HOOK not configured"
+          fi
+
+  # ===========================================
+  # RAILWAY DEPLOYMENT (Free Tier)
+  # ===========================================
+  deploy-railway:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.platform == 'all' || github.event.inputs.platform == 'railway'
+    environment:
+      name: railway-${{ github.event.inputs.environment || 'production' }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy to Railway
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          railway login --token $RAILWAY_TOKEN
+          railway up
+          railway status
+
+  # ===========================================
+  # FLY.IO DEPLOYMENT (Free Tier)
+  # ===========================================
+  deploy-flyio:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.platform == 'all' || github.event.inputs.platform == 'flyio'
+    environment:
+      name: flyio-${{ github.event.inputs.environment || 'production' }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Fly.io CLI
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy to Fly.io
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          if [ -f "fly.toml" ]; then
+            flyctl deploy --remote-only
+          else
+            echo "No fly.toml found, skipping Fly.io deployment"
+          fi
+
+  # ===========================================
+  # CLOUDFLARE PAGES DEPLOYMENT (Free)
+  # ===========================================
+  deploy-cloudflare:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.platform == 'all' || github.event.inputs.platform == 'cloudflare-pages'
+    environment:
+      name: cloudflare-${{ github.event.inputs.environment || 'production' }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build project
+        run: npm run build
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/pages-action@v1
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          projectName: ${{ secrets.CLOUDFLARE_PROJECT_NAME }}
+          directory: dist
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+
+  # ===========================================
+  # SUPABASE DEPLOYMENT (Free Tier)
+  # ===========================================
+  deploy-supabase:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.platform == 'all' || github.event.inputs.platform == 'supabase'
+    environment:
+      name: supabase-${{ github.event.inputs.environment || 'production' }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+
+      - name: Deploy to Supabase
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+        run: |
+          if [ -f "supabase/config.toml" ]; then
+            supabase link --project-ref $SUPABASE_PROJECT_ID
+            supabase db push
+            supabase functions deploy
+          else
+            echo "No Supabase config found, skipping"
+          fi
+
+  # ===========================================
+  # DEPLOYMENT SUMMARY
+  # ===========================================
+  summary:
+    needs: [deploy-netlify, deploy-render, deploy-railway, deploy-flyio, deploy-cloudflare, deploy-supabase]
+    if: always()
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Create summary
+        run: |
+          echo "## 🚀 Free Platform Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Platform | Status | Free Tier |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|--------|-----------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Netlify | ${{ needs.deploy-netlify.result }} | ✅ 100GB bandwidth |" >> $GITHUB_STEP_SUMMARY
+          echo "| Render | ${{ needs.deploy-render.result }} | ✅ 750 hours/month |" >> $GITHUB_STEP_SUMMARY
+          echo "| Railway | ${{ needs.deploy-railway.result }} | ✅ $5 credit/month |" >> $GITHUB_STEP_SUMMARY
+          echo "| Fly.io | ${{ needs.deploy-flyio.result }} | ✅ 3 VMs free |" >> $GITHUB_STEP_SUMMARY
+          echo "| Cloudflare Pages | ${{ needs.deploy-cloudflare.result }} | ✅ Unlimited |" >> $GITHUB_STEP_SUMMARY
+          echo "| Supabase | ${{ needs.deploy-supabase.result }} | ✅ 500MB database |" >> $GITHUB_STEP_SUMMARY
