@@ -1,0 +1,194 @@
+name: "Copilot Setup Steps - Multi-Market Deployment Agent"
+
+# Automatically run the setup steps when they are changed to allow for easy validation
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+  pull_request:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+
+env:
+  # Node.js version for web deployments
+  NODE_VERSION: "20"
+  # Java version for Android builds
+  JAVA_VERSION: "17"
+  # .NET version for Windows/MSIX builds
+  DOTNET_VERSION: "8.0.x"
+  # Python version for API hunter scripts
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  # The job MUST be called `copilot-setup-steps` or it will not be picked up by Copilot.
+  copilot-setup-steps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 59
+
+    # Set the permissions to the lowest permissions possible needed for your steps.
+    permissions:
+      contents: read
+      packages: read
+
+    steps:
+      # ===========================================
+      # CHECKOUT CODE
+      # ===========================================
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      # ===========================================
+      # NODE.JS SETUP (Vercel, Web Apps)
+      # ===========================================
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install Node.js dependencies
+        run: |
+          if [ -f "package.json" ]; then
+            npm ci --prefer-offline --no-audit
+          fi
+          if [ -f "package-lock.json" ]; then
+            echo "Node dependencies cached"
+          fi
+
+      # ===========================================
+      # JAVA/ANDROID SETUP (Google Play, AAB)
+      # ===========================================
+      - name: Set up Java for Android builds
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: "gradle"
+
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Install Android SDK components
+        uses: android-actions/setup-android@v3
+
+      # ===========================================
+      # .NET SETUP (Microsoft Store, MSIX)
+      # ===========================================
+      - name: Set up .NET for MSIX builds
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+          cache: true
+
+      - name: Install MSIX tools
+        run: |
+          dotnet tool install --global Microsoft.VisualStudio.Services.Client
+          dotnet tool install --global NuGet.CommandLine
+          echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
+
+      # ===========================================
+      # PYTHON SETUP (API Hunter)
+      # ===========================================
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+
+      - name: Install Python dependencies for API Hunter
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests beautifulsoup4 lxml aiohttp httpx pyyaml jq pytest
+
+      # ===========================================
+      # INSTALL DEPLOYMENT TOOLS
+      # ===========================================
+      - name: Install Vercel CLI
+        run: npm install -g vercel@latest
+
+      - name: Install Google Play Fastlane
+        run: |
+          gem install bundler
+          gem install fastlane
+          fastlane --version
+
+      - name: Install Azure CLI (for Microsoft Store)
+        run: |
+          curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+          az --version
+
+      # ===========================================
+      # INSTALL API HUNTING TOOLS
+      # ===========================================
+      - name: Install API discovery tools
+        run: |
+          # Install curl-impersonate for advanced API scraping
+          sudo apt-get update && sudo apt-get install -y curl-impersonate || true
+          
+          # Install jq for JSON processing
+          sudo apt-get install -y jq
+          
+          # Install httpie for API testing
+          pip install httpie
+
+      # ===========================================
+      # VALIDATE INSTALLATIONS
+      # ===========================================
+      - name: Validate tool installations
+        run: |
+          echo "=== Node.js ==="
+          node --version
+          npm --version
+          
+          echo "=== Java ==="
+          java -version
+          
+          echo "=== .NET ==="
+          dotnet --version
+          
+          echo "=== Python ==="
+          python --version
+          pip --version
+          
+          echo "=== Vercel CLI ==="
+          vercel --version
+          
+          echo "=== Fastlane ==="
+          fastlane --version
+          
+          echo "=== Azure CLI ==="
+          az --version | head -5
+          
+          echo "=== jq ==="
+          jq --version
+          
+          echo "All tools installed successfully!"
+
+      # ===========================================
+      # CACHE DEPENDENCIES FOR FASTER RUNS
+      # ===========================================
+      - name: Cache all tooling
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.npm
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            ~/.dotnet
+            ~/.cache/pip
+            ~/.cache/fastlane
+          key: ${{ runner.os }}-copilot-tools-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-copilot-tools-
